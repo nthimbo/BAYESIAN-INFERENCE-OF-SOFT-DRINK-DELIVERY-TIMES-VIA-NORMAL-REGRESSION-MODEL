@@ -1,0 +1,427 @@
+---
+title: "Tembo_Nthimbo_Gift_1738522"
+author: "Nthimbo Gift Tembo"
+date: "August 6, 2018"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+
+TITLE: BAYESIAN INFERENCE OF SOFT DRINK DELIVERY TIMES VIA NORMAL REGRESSION MODEL
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include = FALSE}
+library(coda)
+library(boa)
+library(MASS)
+library(ggplot2)
+library(MCMCpack)
+library(reshape2)
+library(R2jags)
+library(superdiag)
+library(bridgesampling)
+library(xyloplot)
+```
+                     
+
+
+Table of Contents
+        
+                      
+1. Data and Model Description
+
+2. Model Building
+
+3. Model Evaluation Tests Via DIC
+
+4. MCMC Analysis and Convergence Diagnostics
+
+5. Comparison of Chosen Model with Frequentist Approach
+
+6. References
+                      
+
+
+
+
+1.Data and Model Description
+
+In this project I have considered Normal based bayesian linear regression. The data deals with the quality of delivery times of soft drink company. My interest is in estimation of the required time needed by each employee to refill an automatic vending machine. Data was collected as a result of small quality assurance study suggesting that delivery times are affected by two independent variables. These variables are the number of cases
+of stocked products that the employee needs to deliver and the distance the employee has to travel to reach the vending machine. Therefore, I have considered four models as follows:
+
+model1: does not support notion of independent variables
+
+model2: suggests that only the number of cases influences the         delivery times
+
+model3: suggests that only distance travelled affects delivery         times
+
+model4: suggesting that delivery times are influenced by both         variables, distance and the number of cases.
+
+Model formulation:
+
+$Y|x_{1},...,x_{p} \sim N(\mu(\boldsymbol\beta, x_{1},...,x_{p}), \sigma^2)$
+
+where
+
+$\mu(\boldsymbol\beta, x_{1},...,x_{p}) =\beta_{0}+\beta_{1}x_{1}+,...,\beta_{p}x_{p}$
+$= \beta_{0}+\sum_{j=1}^{p}\beta_jx_j$
+
+where 
+$\sigma^2$ and $\boldsymbol\beta = (\beta_0, \beta_1, ..,\beta_p)^T$ are a set of regression parameters of interest.
+
+Likelihood is given by;
+
+$Y = (y_1, ...., y_n)$ and $x_{i1}, ...., x_{ip}$, for values of explanatory variables $X_1, ..., X_p$ for $i = 1, ...., n$
+
+Prior distribution of parameters:
+
+$f(\boldsymbol\beta, \tau) = \prod_{j=0}^p f(\beta_j)f(\tau)$ 
+
+therefore,
+
+$\beta_j \sim N(\beta_j\mu, c_j^2)$  $j = 0,..., p$ and $\tau \sim gamma(a, b)$
+
+$c_j^2$ is the prior variance and is set to a high number since I have low prior belief about the model.
+
+
+load our data which consists of 25 observations and make simple plots to see the data
+
+```{r}
+#load the softdrinks data 
+my.data <- read.csv("softdrinks.txt", sep = "")
+
+#get sample of our data 
+head(my.data)
+#plot of the response(y) of the data
+ggplot(my.data,aes(Time)) + geom_histogram(fill = "green", color = "gray")
+
+y = as.matrix(my.data[c(TRUE, FALSE, FALSE)])
+y = as.numeric(y)
+
+X = as.matrix(my.data[c(FALSE, TRUE, TRUE)])
+
+```
+
+2. Model Building
+
+Since we have one response variable and two independent variables we will have four models to choose from. Hence we build four models.
+
+```{r}
+#Building the models 
+#----model1 with only b0
+model1 <- function(){
+  # model's likelihood
+  for (i in 1:n){
+    y[i] ~ dnorm(mu[i], tau)# stochastic componenent
+    # link and linear predictor
+    mu[i] <- beta0  
+  }
+  # prior distributions
+  tau ~ dgamma( 0.01, 0.01 )# stochastic componenent
+  beta0 ~ dnorm( 0.0, 1.0E-4)# stochastic componenent
+  # definition of sigma
+  s2<-1/tau
+  sigma <-sqrt(s2)
+  # calculation of the sample variance
+  for(ii in 1:n){
+    c.time[ii]<-y[ii]-mean(y) 
+  } 
+  sy2 <- inprod(c.time[], c.time[] )/(n-1)
+  # calculation of Bayesian version R squared
+  R2B <- 1 - s2/sy2
+  # Expected y for a typical delivery time
+  expected.y <- beta0
+  #
+  # posterior probabilities of positive beta's
+  p.beta0 <- step(beta0)
+}
+
+inits1 = inits_2 <- function(){
+  list("tau" = 1, "beta0" = 1)}
+n = NROW(y)
+param.to.save = c("beta0","tau", "R2B", "sigma")
+model1.data =list("n" = n,"y" = y)
+
+fit.model1 <- jags(data = model1.data, inits = inits1, parameters.to.save =param.to.save,
+                   n.chains =3, n.iter = 2000, n.burnin = 1000,  n.thin = 1, model.file = model1)
+
+
+#---Building the model2 with assumption of b0 and b1
+model2 <- function(){
+  # model's likelihood
+  for (i in 1:n){
+    y[i] ~ dnorm(mu[i], tau )# stochastic componenent
+    # link and linear predictor
+    mu[i] <- beta0+inprod(beta[1:nPred] , X[i,1:nPred])   
+  }
+  # prior distributions
+  tau ~ dgamma( 0.01, 0.01 )# stochastic componenent
+  beta0 ~ dnorm( 0.0, 1.0E-4)# stochastic componenent
+  for(j in 1:nPred){
+    beta[j] ~ dnorm( 0, 1.0E-4)# stochastic componenent
+  }
+  # definition of sigma
+  s2<-1/tau
+  sigma <-sqrt(s2)
+  # calculation of the sample variance
+  for(ii in 1:n){
+    c.time[ii]<-y[ii]-mean(y) 
+  } 
+  sy2 <- inprod( c.time[], c.time[] )/(n-1)
+  # calculation of Bayesian version R squared
+  R2B <- 1 - s2/sy2
+  # Expected y for a typical delivery time
+  expected.y <- beta0 + beta[1] * mean(X[1:n, 1])
+  #
+  # posterior probabilities of positive beta's
+  p.beta0 <- step(beta0)
+  p.beta1 <- step(beta[1])
+}
+
+
+
+nPred = 1
+inits1 = inits_2 <- function(){
+  list("tau" = 1, "beta0" = 1, "beta" = rep(0, nPred))}
+n = NROW(y)
+param.to.save = c("beta0", "beta", "tau", "R2B", "sigma", "expected.y")
+model1.data =list("n" = n, nPred = nPred, "y" = y, "X" = X)
+
+fit.model2 <- jags(data = model1.data,inits = inits1, parameters.to.save=param.to.save,n.chains =3, n.iter = 2000, n.burnin = 1000,  n.thin = 1, model.file = model2)
+
+
+#--Now we build the model3 with variable Distance
+
+model3 <- function(){
+  # model's likelihood
+  for (i in 1:n){
+    y[i] ~ dnorm(mu[i], tau )# stochastic componenent
+    # link and linear predictor
+    mu[i] <- beta0+inprod(beta[1:nPred] , X[i,1:nPred])   
+  }
+  # prior distributions
+  tau ~ dgamma( 0.01, 0.01 )# stochastic componenent
+  beta0 ~ dnorm( 0.0, 1.0E-4)# stochastic componenent
+  for(j in 1:nPred){
+    beta[j] ~ dnorm( 0, 1.0E-4)# stochastic componenent
+  }
+  # definition of sigma
+  s2<-1/tau
+  sigma <-sqrt(s2)
+  # calculation of the sample variance
+  for(ii in 1:n){
+    c.time[ii]<-y[ii]-mean(y) 
+  } 
+  sy2 <- inprod( c.time[], c.time[] )/(n-1)
+  # calculation of Bayesian version R squared
+  R2B <- 1 - s2/sy2
+  # Expected y for a typical delivery time
+  expected.y <- beta0+ beta[1] * mean(X[1:n, 2])
+  #
+  # posterior probabilities of positive beta's
+  p.beta0 <- step(beta0)
+  p.beta2 <- step(beta[1])
+}
+
+nPred = 1
+inits1 = inits_2 <- function(){
+  list("tau" = 1, "beta0" = 1, "beta" = rep(0, nPred))}
+n = NROW(y)
+param.to.save = c("beta0", "beta", "tau", "R2B", "sigma", "expected.y")
+model1.data =list("n" = n, nPred = nPred, "y" = y, "X" = X)
+
+fit.model3 <- jags(data = model1.data, inits = inits1,            parameters.to.save=param.to.save,n.chains =3, n.iter = 2000, n.burnin = 1000, n.thin = 1, model.file = model3)
+
+
+
+#--Now we build model with all the features
+model4 <- function(){
+  # model's likelihood
+  for (i in 1:n){
+    y[i] ~ dnorm(mu[i], tau )# stochastic componenent
+    # link and linear predictor
+    mu[i] <- beta0+inprod(beta[1:nPred] , X[i,1:nPred])   
+  }
+  # prior distributions
+  tau ~ dgamma( 0.01, 0.01 )# stochastic componenent
+  beta0 ~ dnorm( 0.0, 1.0E-4)# stochastic componenent
+  for(j in 1:nPred){
+    beta[j] ~ dnorm( 0, 1.0E-4)# stochastic componenent
+  }
+  # definition of sigma
+  s2<-1/tau
+  sigma <-sqrt(s2)
+  # calculation of the sample variance
+  for(ii in 1:n){
+    c.time[ii]<-y[ii]-mean(y) 
+    } 
+  sy2 <- inprod( c.time[], c.time[] )/(n-1)
+  # calculation of Bayesian version R squared
+  R2B <- 1 - s2/sy2
+  # Expected y for a typical delivery time
+  expected.y <- beta0 + beta[1] * mean(X[1:n, 1]) + beta[2] * mean(X[1:n, 2])
+  #
+  # posterior probabilities of positive beta's
+  p.beta0 <- step(beta0)
+  p.beta1 <- step(beta[1])
+  p.beta2 <- step(beta[2])
+}
+
+nPred = NCOL(X)
+inits1 = inits_2 <- function(){
+  list("tau" = 1, "beta0" = 1, "beta" = rep(0, nPred))}
+n = NROW(y)
+param.to.save = c("beta0", "beta", "tau", "R2B", "sigma", "expected.y")
+model1.data =list("n" = n, nPred = nPred, "y" = y, "X" = X)
+
+fit.model4 <- jags(data = model1.data, inits = inits1, parameters.to.save =param.to.save,
+                    n.chains =3, n.iter = 2000, n.burnin = 1000,  n.thin = 1, model.file = model4)
+```
+
+3. Model Evaluation Tests
+
+Now after creating the models we can easily computer the DIC model evaluation criteria. Natural way to compare models is to use criterion based on trade-off between the fit of the data to the model and the corresponding complexity of the model. In this project I compared four models.
+
+Deviance Information Criterion, $DIC = $goodness of fit$+$complexity
+
+$DIC(m) = 2\bar{D(\theta_{m}, m)} - D(\bar\theta_{m}, m)$
+        $= D(\bar\theta_{m}, m) + 2p_{m}$
+$D(\theta_{m}, m) = -2logf(y|\theta_{m}, m)$
+$\bar{D(\theta_{m}, m)}$ is deviance posterior mean.
+$p_{m}$ is the number of effective parameters for model m
+$p_{m} = \bar{D(\theta_{m}, m)} - D(\bar\theta_{m}, m)$
+and $\bar\theta$ is the posterior mean of parameters involved in model m.
+
+For our case JAGS Automatically calculates DIC. The smaller the DIC the better model as supported by theory.
+
+
+Here below I compare models using DIC and I also considered the calculated bayesian version of R-suared, which I expected the better supported model to have a high score.
+
+```{r}
+#Now we can compare our models via DIC(Deviance Information Criteria) 
+dic.samples(fit.model1$model,n.iter =2e3)
+fit.model1$BUGSoutput$mean$R2B
+#model 2
+dic.samples(fit.model2$model,n.iter =2e3)
+fit.model2$BUGSoutput$mean$R2B
+#model 3
+dic.samples(fit.model3$model,n.iter =2e3)
+fit.model3$BUGSoutput$mean$R2B
+#model4
+dic.samples(fit.model4$model,n.iter =2e3)
+fit.model4$BUGSoutput$mean$R2B
+
+```
+As can be seen that model4 has the lowest DIC hence according to theory is our best model out of all
+
+
+4. MCMC Analysis and Convergency Diagnostics
+
+
+Checking model convergency I have decided to use Gelman-Rubin diagnostics plots and also Heildel diagonostics to see if each parameter has passed the invariant distribution.
+
+Gelman Diagnostics are calculated as below:
+1. Compute m independent markov chains
+2. compare the variance of each chain to pooled variance 
+Therefore, provides an estimate of how much variance could be reduced by running chains longer.
+
+
+```{r}
+mcmc.model4 = as.mcmc(fit.model4)
+heidel.diag(mcmc.model4)
+summary(mcmc.model4)
+gelman.plot(mcmc.model4)
+
+
+```
+
+Analysis of the model via posterior values 
+```{r}
+plot(fit.model4)
+
+
+```
+
+Analysis of the plots above:
+
+statistic for each parameter provides a measure of sampling efficiency/effectiveness. Ideally, all values should be less than 1.05. If there are values of 1.05 or greater it suggests that the sampler was not very efficient or effective. Not only does this mean that the sampler was potentiall slower than it could have been, more importantly, it could indicate that the sampler spent time sampling in a region of the likelihood that is less informative. Such a situation can arise from either a misspecified model or overly vague priors that permit sampling in otherwise nonscence parameter space. As can be seen in the plots for R-hat all parameter values are less that 1.05 which is a good thing.
+
+```{r}
+#plotting of history of parameters
+mcmc.model4 <- as.mcmc(fit.model4)
+traceplot(mcmc.model4)
+```
+
+Plots of histograms of these posterior values of interest. These are density plots after a burnin of 1000 
+
+```{r}
+output <-fit.model4$BUGSoutput$sims.matrix
+beta0 <- output[,"beta0"]
+beta1 <- output[,"beta[1]"]
+beta2 <- output[,"beta[2]"]
+tau <- output[,"tau"]
+sigma <- output[,"sigma"]
+expected.y <- output[,"expected.y"]
+
+
+hist(beta0,col='orchid',breaks = 80, prob = T, main = "Posterior distribution of beta0")
+abline(v = mean(beta0), col = "blue", lwd = 2)
+lines(density(beta0),col='red',lwd=2, lty = c(1, 3))
+
+hist(beta1,col='orchid',breaks = 80, prob = T, main = "Posterior distribution of beta1")
+abline(v = mean(beta1), col = "blue", lwd = 2)
+lines(density(beta1),col='red',lwd=2, lty = c(1, 3))
+
+hist(beta2,col='orchid',breaks = 80, prob= T, main = "Posterior distribution of beta2")
+abline(v = mean(beta2), col = "blue", lwd = 2)
+lines(density(beta2),col='red',lwd=2, lty = c(1, 3))
+
+hist(tau,col='orchid',breaks = 80, prob = T, main = "Posterior distribution of tau")
+abline(v = mean(tau), col = "blue", lwd = 2)
+lines(density(tau),col='red',lwd=2)
+
+hist(sigma,col='orchid',breaks = 80, prob = T, main = "Posterior distribution of sigma")
+abline(v = mean(sigma), col = "blue", lwd = 2)
+lines(density(sigma),col='red',lwd=2)
+
+
+hist(expected.y,col='orchid',breaks = 80, prob = T, main = "Posterior distribution of expected y (Delivery Time)")
+abline(v = mean(expected.y), col = "blue", lwd = 2)
+lines(density(expected.y),col='red',lwd=2)
+```
+
+5. Comparison of Chosen Model with Frequentist Approach
+
+Now we can compare the Frequentist approach and the beyasian parameter estimation for our model:
+
+```{r}
+#Bayesian estimated coefficients 
+beta0 <- fit.model4$BUGSoutput$mean$beta0
+beta <-  fit.model4$BUGSoutput$mean$beta
+c("b0" = beta0, "b" = beta)
+bayes_coef =c("b0" = beta0, "b" = beta) 
+#Now we fit the linear model and estimate the parameters
+fit <- lm(my.data$Time~., data =my.data[c(FALSE, TRUE, TRUE)])
+fit$coefficients
+```
+As can be seen from the estimated coefficients of regression in both frequentist approach and bayesian approach. The values are almost exact.
+
+
+6. References
+
+  1. Ioannis Ntzoufras, (2010) "Bayesian Modeling Using winBUGS"
+  2. Petri Koistinen, (2010), "Monte Carlo Methods, with an emphasis on
+      Bayesian computation". 
+  3. http://webpages.math.luc.edu/~ebalderama/myfiles/modelchecking101_pres.pdf
+
+
+
